@@ -3,17 +3,6 @@ package com.documents4j.job;
 import com.documents4j.api.*;
 import com.documents4j.ws.ConverterNetworkProtocol;
 import com.documents4j.ws.ConverterServerInformation;
-import com.google.common.primitives.Ints;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.conn.HttpClientConnectionManager;
-import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
-import org.glassfish.jersey.apache.connector.ApacheClientProperties;
-import org.glassfish.jersey.apache.connector.ApacheConnectorProvider;
-import org.glassfish.jersey.client.ClientConfig;
-import org.glassfish.jersey.client.ClientProperties;
-import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
-import org.glassfish.jersey.client.filter.EncodingFeature;
-import org.glassfish.jersey.message.GZipEncoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,7 +10,6 @@ import javax.net.ssl.SSLContext;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
 import jakarta.ws.rs.client.WebTarget;
-import jakarta.ws.rs.core.Feature;
 import jakarta.ws.rs.core.MediaType;
 import java.io.File;
 import java.net.URI;
@@ -52,9 +40,9 @@ public class RemoteConverter extends ConverterAdapter {
 
     protected RemoteConverter(URI baseUri, File baseFolder, long requestTimeout,
                               int corePoolSize, int maximumPoolSize, long keepAliveTime,
-                              SSLContext sslContext, UsernamePasswordCredentials usernamePasswordCredentials) {
+                              SSLContext sslContext, String userName, String password) {
         super(baseFolder);
-        this.client = makeClient(requestTimeout, maximumPoolSize, sslContext, usernamePasswordCredentials);
+        this.client = makeClient(requestTimeout, maximumPoolSize, sslContext, userName, password);
         this.baseUri = baseUri;
         this.executorService = makeExecutorService(corePoolSize, maximumPoolSize, keepAliveTime);
         this.requestTimeout = requestTimeout;
@@ -90,40 +78,18 @@ public class RemoteConverter extends ConverterAdapter {
         return builder().baseUri(baseUri).build();
     }
 
-    private static Client makeClient(long requestTimeout, int maxConnections, SSLContext sslContext, UsernamePasswordCredentials usernamePasswordCredentials) {
-        ClientConfig clientConfig = new ClientConfig();
-        int castRequestTimeout = Ints.checkedCast(requestTimeout);
-        clientConfig.register(makeGZipFeature());
-        clientConfig.property(ClientProperties.ASYNC_THREADPOOL_SIZE, maxConnections);
-        clientConfig.property(ClientProperties.CONNECT_TIMEOUT, castRequestTimeout);
-        clientConfig.property(ClientProperties.READ_TIMEOUT, castRequestTimeout);
-        clientConfig.property(ApacheClientProperties.CONNECTION_MANAGER, makeConnectionManager(maxConnections));
-        clientConfig.connectorProvider(new ApacheConnectorProvider());
-        if (usernamePasswordCredentials != null && usernamePasswordCredentials.getUserName() != null && !usernamePasswordCredentials.getUserName().isEmpty()) {
-            clientConfig.register(HttpAuthenticationFeature.basicBuilder()
-                    .credentials(usernamePasswordCredentials.getUserName(), usernamePasswordCredentials.getPassword())
-                    .build());
+    private static Client makeClient(long requestTimeout, int maxConnections, SSLContext sslContext, String userName, String password) {
+        ClientBuilder builder = ClientBuilder.newBuilder()
+            .connectTimeout(requestTimeout, TimeUnit.MILLISECONDS)
+            .readTimeout(requestTimeout, TimeUnit.MILLISECONDS);
+        if (userName != null) {
+            builder.register(new BasicAuthFilter(userName, password));
         }
         if (sslContext != null) {
-            return ClientBuilder.newBuilder().sslContext(sslContext).withConfig(clientConfig).build();
+            return builder.sslContext(sslContext).build();
         } else {
-            return ClientBuilder.newClient(clientConfig);
+            return builder.build();
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Feature makeGZipFeature() {
-        return new EncodingFeature(ConverterNetworkProtocol.COMPRESSION_TYPE_GZIP, GZipEncoder.class);
-    }
-
-    private static HttpClientConnectionManager makeConnectionManager(int maxConnections) {
-        // Jersey requires an instance of the ClientConnectionManager interface which is deprecated in the latest
-        // version of the Apache HttpComponents. In a future version, this implementation should be updated to
-        // the PoolingHttpClientConnectionManager and the HttpClientConnectionManager.
-        PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
-        connectionManager.setMaxTotal(maxConnections);
-        connectionManager.setDefaultMaxPerRoute(maxConnections);
-        return connectionManager;
     }
 
     private WebTarget makeTarget() {
@@ -289,7 +255,7 @@ public class RemoteConverter extends ConverterAdapter {
             checkNotNull(baseUri, "The base URI was not set");
             return new RemoteConverter(baseUri, normalizedBaseFolder(), requestTimeout,
                     corePoolSize, maximumPoolSize, keepAliveTime,
-                    sslContext, userName != null ? new UsernamePasswordCredentials(userName, password) : null);
+                    sslContext, userName, password);
         }
 
         /**
