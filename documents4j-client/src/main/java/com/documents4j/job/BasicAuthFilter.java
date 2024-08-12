@@ -7,9 +7,7 @@ import java.util.Base64;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.client.ClientRequestFilter;
 import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.ext.Provider;
 
-@Provider
 public class BasicAuthFilter implements ClientRequestFilter {
     private String user;
     private String password;
